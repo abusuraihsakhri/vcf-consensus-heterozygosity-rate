@@ -38,38 +38,50 @@ License: MIT
 
 ---
 
-## 📐 Mathematical Formulation & Logic
+## 💻 Installation
 
-```text
-  score = primary_val
-  rounded_score = round(score, 2)
-  res = calculate_metrics(**kwargs)
-  calc_res = calculate_metrics(**r)
+```bash
+# Clone the repository
+git clone https://github.com/abusuraihsakhri/vcf-consensus-heterozygosity-rate.git
+cd vcf-consensus-heterozygosity-rate
+
+# Install dependencies
+pip install -e ".[dev]"
 ```
 
 ---
 
 ## 💻 CLI Quickstart & Usage
 
-### 1. Guided Interactive Mode
+### 1. Single Evaluation
 ```bash
-python cli.py
+python vcf_titv.py single --v1 12.0 --v2 4.0 --v3 2.0
 ```
 
-### 2. Direct Parameterized Evaluation
+### 2. Batch Processing
 ```bash
-python cli.py --task-id <value> --target <value> --primary <value> --secondary <value>
+python vcf_titv.py batch -i sample.csv -o results.csv
+```
+
+### 3. Enterprise CLI (Full Feature Set)
+```bash
+# Audit a single task
+python cli.py audit --task-id TASK-001 --primary 28.5 --secondary 14.2
+
+# Batch process CSV records
+python cli.py batch -i sample.csv -o results.csv
+
+# Verify HMAC audit trail integrity
+python cli.py verify-audit
+
+# Launch FastAPI REST server
+python cli.py serve --host 127.0.0.1 --port 8000
 ```
 
 ### Parameter Reference
-- `--task-id`: Specifies input measurement or parameter value.
-- `--target`: Specifies input measurement or parameter value.
-- `--primary`: Specifies input measurement or parameter value.
-- `--secondary`: Specifies input measurement or parameter value.
-- `--critical`: Specifies input measurement or parameter value.
-- `--status`: Specifies input measurement or parameter value.
-- `--input`: Specifies input measurement or parameter value.
-- `--output`: Specifies input measurement or parameter value.
+- `--v1`, `--v2`, `--v3`: Numeric parameters for single evaluation
+- `-i`, `--input`: Input CSV file path for batch processing
+- `-o`, `--output`: Output CSV file path (default: results.csv)
 
 ### Input Data Schema
 
@@ -90,6 +102,14 @@ python cli.py --task-id <value> --target <value> --primary <value> --secondary <
 * **Active Learning Bayesian Calibration:** Dynamic tracker updating worker reliability weights and monitoring Brier calibration drift.
 * **FastAPI & Prometheus Telemetry:** Exposes OpenAPI 3.1 REST endpoints and operational Prometheus metrics (`/metrics`).
 
+### Security Configuration
+
+Set the `AUDIT_SECRET_KEY` environment variable for persistent audit integrity:
+
+```bash
+export AUDIT_SECRET_KEY="your-secure-random-key"
+```
+
 ---
 
 ## 🧪 Testing & Verification
@@ -103,7 +123,7 @@ pytest -v
 Execute high-throughput batch simulation benchmarks:
 
 ```bash
-python simulator.py --tasks 1000 --concurrency 8
+python simulator.py 1000
 ```
 
 ---
@@ -113,4 +133,34 @@ python simulator.py --tasks 1000 --concurrency 8
 ```bash
 docker build -t vcf-consensus-heterozygosity-rate .
 docker run -p 8000:8000 vcf-consensus-heterozygosity-rate
+```
+
+---
+
+## 📁 Project Structure
+
+```
+vcf-consensus-heterozygosity-rate/
+├── agents/                 # Enterprise agent framework
+│   ├── __init__.py
+│   ├── api.py             # FastAPI REST server
+│   ├── base.py            # Security, PHI guard, audit trail
+│   ├── learning.py        # Bayesian calibration engine
+│   ├── llm_factory.py     # LLM provider factory
+│   ├── metrics.py         # Prometheus metrics collector
+│   ├── models.py          # Pydantic data models
+│   ├── streamer.py        # WebSocket telemetry streamer
+│   ├── supervisor.py      # Multi-agent orchestrator
+│   └── workers.py         # Specialized domain workers
+├── tests/                 # Test suite
+│   ├── test_enrichment.py
+│   └── test_vcf_consensus_heterozygosity_rate.py
+├── cli.py                 # Enterprise CLI entry point
+├── vcf_titv.py            # Core Ti/Tv analysis module
+├── enrichment.py          # Enrichment feature modules
+├── simulator.py           # High-throughput simulation
+├── sample.csv             # Sample input data
+├── pyproject.toml         # Python project configuration
+├── Dockerfile             # Container build config
+└── docker-compose.yml     # Multi-container orchestration
 ```
