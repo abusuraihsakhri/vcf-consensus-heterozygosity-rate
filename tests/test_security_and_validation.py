@@ -40,12 +40,12 @@ class TestProcessBatchErrorHandling:
     def test_batch_output_content(self, tmp_path):
         csv_in = tmp_path / "in.csv"
         csv_out = tmp_path / "out.csv"
-        csv_in.write_text("Patient_ID,v1,v2\nPT-001,10.0,5.0\n", encoding="utf-8")
+        csv_in.write_text("sample,transitions,transversions\nS1,10,5\n", encoding="utf-8")
         process_batch(str(csv_in), str(csv_out))
         content = csv_out.read_text(encoding="utf-8")
-        assert "PT-001" in content
-        assert "score" in content
-        assert "classification" in content
+        assert "S1" in content
+        assert "ti_tv_ratio" in content
+        assert ",2.0" in content
 
 
 class TestAuditTrailSecurity:
@@ -114,24 +114,36 @@ class TestCalculateMetrics:
     """Tests for core calculation function."""
 
     def test_basic_calculation(self):
-        res = calculate_metrics(v1=10.0, v2=5.0)
-        assert res["score"] == 12.5  # 10 + 5*(1/2) = 12.5
-        assert res["classification"] == "Moderate / Intermediate"
+        res = calculate_metrics(transitions=10, transversions=5, heterozygous=3, homozygous_ref=1)
+        assert res["ti_tv_ratio"] == 2
+        assert res["heterozygosity_rate"] == 0.75
 
-    def test_low_tier(self):
-        res = calculate_metrics(v1=5.0)
-        assert res["classification"] == "Low / Standard"
+    def test_undefined_ratio(self):
+        assert calculate_metrics(transitions=1)["ti_tv_ratio"] is None
+        assert calculate_metrics()["heterozygosity_rate"] is None
 
-    def test_high_tier(self):
-        res = calculate_metrics(v1=30.0)
-        assert res["classification"] == "High / Severe"
+    @pytest.mark.parametrize("invalid", [-1, 1.5, float("nan"), float("inf"), "text", True])
+    def test_invalid_count(self, invalid):
+        with pytest.raises(ValueError):
+            calculate_metrics(transitions=invalid)
 
-    def test_empty_input(self):
-        res = calculate_metrics()
-        assert res["score"] == 1.0  # default primary_val
-        assert res["inputs_evaluated"] == 0
+    def test_mixed_ploidy_denominator(self):
+        res = calculate_metrics(heterozygous=1, homozygous_ref=1, missing=1, other_ploidy=1)
+        assert res["called_diploid"] == 2
+        assert res["heterozygosity_rate"] == 0.5
+        assert res["missing_rate"] == 0.25
 
-    def test_string_input_ignored(self):
-        res = calculate_metrics(v1=10.0, name="test")
-        assert res["score"] == 10.0
-        assert res["inputs_evaluated"] == 2
+
+def test_audit_signature_tampering_detected():
+    trail = AuditTrail(secret_key="test-key-for-signature")
+    trail.log("tester", "test", "EVENT", {"value": 1})
+    assert trail.verify_integrity()
+    trail.logs[0]["actor"] = "intruder"
+    assert not trail.verify_integrity()
+
+
+def test_audit_last_block_tampering_detected():
+    trail = AuditTrail(secret_key="test-key-for-signature")
+    trail.log("tester", "test", "EVENT", {"value": 1})
+    trail.logs[0]["current_hash"] = "0" * 64
+    assert not trail.verify_integrity()
