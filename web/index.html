@@ -1,236 +1,116 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vcf Consensus Heterozygosity Rate — Operations Console</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #090d16;
-            --card: #111827;
-            --border: #1f293d;
-            --accent: #3b82f6;
-            --accent-glow: rgba(59, 130, 246, 0.25);
-            --text: #f3f4f6;
-            --text-muted: #9ca3af;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --success: #10b981;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Inter', sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            padding: 2rem;
-            min-height: 100vh;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        .header-title h1 { font-size: 1.6rem; font-weight: 700; color: #fff; }
-        .header-title p { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
-        .badge {
-            display: inline-block;
-            padding: 0.3rem 0.8rem;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            background: var(--accent-glow);
-            color: var(--accent);
-            border: 1px solid var(--accent);
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr 1.2fr;
-            gap: 1.5rem;
-        }
-        .card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-        }
-        .card h2 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .form-group { margin-bottom: 1rem; }
-        label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.4rem; }
-        input, select, textarea {
-            width: 100%;
-            padding: 0.65rem 0.9rem;
-            background: #0d1322;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: #fff;
-            font-family: inherit;
-            font-size: 0.9rem;
-        }
-        input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-        .btn {
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            padding: 0.7rem 1.4rem;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: 0.2s;
-            width: 100%;
-        }
-        .btn:hover { background: #2563eb; }
-        .terminal {
-            background: #060911;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.85rem;
-            color: #10b981;
-            height: 380px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-        }
-        .metrics-bar {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-        .metric-box {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-            text-align: center;
-        }
-        .metric-val { font-size: 1.4rem; font-weight: 700; color: #fff; margin-top: 0.25rem; }
-        .metric-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Local VCF variant Ti/Tv and per-sample genotype quality-control summaries.">
+  <title>VCF Ti/Tv and Heterozygosity Analyzer</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      --bg: #0b1220; --panel: #152238; --edge: #334761; --text: #f1f5fb;
+      --muted: #b7c7d8; --accent: #81c9ff; --bad: #ffc3c3; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--text); background: var(--bg); line-height: 1.5; }
+    main { max-width: 1100px; margin: auto; padding: clamp(1rem, 4vw, 2.5rem); }
+    h1 { font-size: clamp(1.45rem, 3vw, 2rem); line-height: 1.2; margin: 0 0 .6rem; }
+    h2 { font-size: 1.1rem; margin: 0 0 .9rem; }
+    p { margin: 0 0 1rem; color: var(--muted); }
+    .intro { max-width: 80ch; }
+    .columns { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.4fr); gap: 1rem; }
+    .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem; }
+    label { display: block; font-weight: 600; margin-bottom: .4rem; }
+    input[type="file"], textarea { width: 100%; background: var(--bg); border: 1px solid var(--edge);
+      color: var(--text); border-radius: 7px; padding: .65rem; margin-bottom: .9rem; font: inherit; }
+    textarea { min-height: 155px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .82rem; resize: vertical; }
+    .hint { color: var(--muted); font-size: .84rem; }
+    .inline { display: flex; align-items: center; gap: .5rem; margin: .15rem 0 1.1rem; }
+    .inline label { margin: 0; font-weight: 400; }
+    button { border: 1px solid var(--accent); background: #183e5e; color: var(--text);
+      font: inherit; font-weight: 600; padding: .6rem 1rem; border-radius: 7px; cursor: pointer; }
+    button.primary { background: #21629a; }
+    button:hover:not(:disabled) { background: #2b719e; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; margin-bottom: 1rem; }
+    .stat { background: var(--bg); border: 1px solid var(--edge); border-radius: 8px; padding: .85rem; }
+    .stat strong { display: block; font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+    .stat span { color: var(--muted); font-size: .83rem; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; white-space: nowrap; font-size: .89rem; }
+    th, td { border-bottom: 1px solid var(--edge); padding: .65rem .7rem; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: .81rem; }
+    .status { margin: .8rem 0; padding: .65rem .8rem; border-left: 3px solid var(--accent);
+      background: var(--bg); overflow-wrap: anywhere; }
+    .status.error { border-left-color: var(--bad); color: var(--bad); }
+    .note { color: var(--muted); font-size: .84rem; }
+    footer { border-top: 1px solid var(--edge); padding-top: .9rem; margin-top: 1rem; font-size: .86rem; }
+    a { color: var(--accent); }
+    @media (max-width: 760px) {
+      .columns { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .panel { padding: .95rem; }
+    }
+  </style>
+  <script src="./vcf.js" defer></script>
+  <script src="./app.js" defer></script>
 </head>
 <body>
-
-    <div class="header">
-        <div class="header-title">
-            <h1>Vcf Consensus Heterozygosity Rate</h1>
-            <p>Domain: Clinical & Cryptographic AI | Standard: CAP / CLSI / NIST Standards | LabMind-Atlas Architecture</p>
+  <main>
+    <header>
+      <h1>VCF Ti/Tv &amp; Heterozygosity Analyzer</h1>
+      <p class="intro">Calculate SNP transition/transversion ratios and per-sample diploid genotype statistics from a VCF 4.x file. Processing occurs entirely in your browser; no file content is uploaded.</p>
+    </header>
+    <div class="columns">
+      <section class="panel" aria-labelledby="input-heading">
+        <h2 id="input-heading">VCF input</h2>
+        <form id="analyze-form">
+          <label for="vcf-file">Select a plain-text .vcf file</label>
+          <input id="vcf-file" type="file" accept=".vcf,.txt,text/plain">
+          <p class="hint">Maximum 20 MB for browser analysis. For larger VCFs or .vcf.gz files, use the streaming Python CLI.</p>
+          <label for="vcf-text">Or paste VCF text</label>
+          <textarea id="vcf-text" spellcheck="false" placeholder="##fileformat=VCFv4.2&#10;#CHROM&#9;POS&#9;ID&#9;REF&#9;ALT&#9;QUAL&#9;FILTER&#9;INFO&#9;FORMAT&#9;Sample1"></textarea>
+          <div class="inline">
+            <input id="pass-only" type="checkbox">
+            <label for="pass-only">Retain only records with FILTER=PASS</label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="primary" id="analyze-button">Analyze VCF</button>
+            <button type="button" id="load-example">Load example</button>
+            <button type="reset" id="reset-button">Clear</button>
+          </div>
+        </form>
+        <div id="status" class="status" role="status" aria-live="polite">Choose a VCF file, paste text, or load the example.</div>
+      </section>
+      <section class="panel" aria-labelledby="results-heading">
+        <h2 id="results-heading">Quality-control summary</h2>
+        <div class="stats" aria-label="Variant statistics">
+          <div class="stat"><strong id="metric-variants">—</strong><span>Retained variant records</span></div>
+          <div class="stat"><strong id="metric-snvs">—</strong><span>Eligible SNP ALT alleles</span></div>
+          <div class="stat"><strong id="metric-ti">—</strong><span>Transitions</span></div>
+          <div class="stat"><strong id="metric-tv">—</strong><span>Transversions</span></div>
+          <div class="stat"><strong id="metric-ratio">—</strong><span>Ti/Tv ratio</span></div>
+          <div class="stat"><strong id="metric-samples">—</strong><span>Samples</span></div>
         </div>
-        <div>
-            <span class="badge">Air-Gapped Active</span>
-            <span class="badge" style="background: rgba(16,185,129,0.2); color: #10b981; border-color: #10b981;">Zero-PHI Guard Active</span>
+        <h2>Per-sample genotype metrics</h2>
+        <div class="scroll">
+          <table>
+            <thead><tr><th scope="col">Sample</th><th scope="col">Het</th><th scope="col">Hom ALT</th><th scope="col">Hom REF</th><th scope="col">Missing</th><th scope="col">Other ploidy</th><th scope="col">Het rate</th><th scope="col">Missing rate</th><th scope="col">Het/Hom ALT</th></tr></thead>
+            <tbody id="sample-rows"><tr><td colspan="9">No analysis yet.</td></tr></tbody>
+          </table>
         </div>
+        <div class="actions" style="margin-top: 1rem">
+          <button type="button" id="download-json" disabled>Export JSON</button>
+          <button type="button" id="download-csv" disabled>Export CSV</button>
+        </div>
+        <p class="note" style="margin-top: 1rem">Undefined ratios are shown as N/A, not zero. Het rate = heterozygous / fully called diploid genotypes. Missing rate = missing or partially missing GT calls / retained genotype records.</p>
+      </section>
     </div>
-
-    <div class="metrics-bar">
-        <div class="metric-box">
-            <div class="metric-label">System Status</div>
-            <div class="metric-val" style="color: var(--success);" id="m-status">OPTIMAL</div>
-        </div>
-        <div class="metric-box">
-            <div class="metric-label">Tasks Processed</div>
-            <div class="metric-val" id="m-tasks">142</div>
-        </div>
-        <div class="metric-box">
-            <div class="metric-label">Audit Blocks Signed</div>
-            <div class="metric-val" id="m-audit">142</div>
-        </div>
-        <div class="metric-box">
-            <div class="metric-label">PHI Interceptions</div>
-            <div class="metric-val" style="color: var(--accent);" id="m-phi">0</div>
-        </div>
-    </div>
-
-    <div class="grid">
-        <div class="card">
-            <h2>⚙️ Dispatch Distributed Component Audit</h2>
-            <div class="form-group">
-                <label>Task / Sample ID</label>
-                <input type="text" id="task_id" value="TASK-2026-LIVE-01">
-            </div>
-            <div class="form-group">
-                <label>Target Identifier</label>
-                <input type="text" id="target_id" value="SPECIMEN-ALPHA-77">
-            </div>
-            <div class="form-group">
-                <label>Primary Measurement / Value</label>
-                <input type="number" id="primary_metric" value="29.4" step="0.1">
-            </div>
-            <div class="form-group">
-                <label>Secondary Metric / Kinetic Index</label>
-                <input type="number" id="secondary_metric" value="14.8" step="0.1">
-            </div>
-            <div class="form-group">
-                <label>Status / Phenotype Descriptor</label>
-                <input type="text" id="status_descriptor" value="DISCORDANT_ANOMALY">
-            </div>
-            <div class="form-group">
-                <label><input type="checkbox" id="is_critical" checked> Trigger Emergency / Critical Flag</label>
-            </div>
-            <button class="btn" onclick="runAudit()">Execute Distributed Component Audit</button>
-        </div>
-
-        <div class="card">
-            <h2>📊 Real-Time Consensus Dossier & Audit Log</h2>
-            <div class="terminal" id="outputConsole">// Vcf Consensus Heterozygosity Rate Operations Console Ready
-// Connection established with Air-Gapped Supervisor
-// Cryptographic HMAC-SHA256 audit ledger loaded.
-// Ready for live task payload dispatch...</div>
-        </div>
-    </div>
-
-    <script>
-        async function runAudit() {
-            const consoleEl = document.getElementById('outputConsole');
-            consoleEl.innerText = "// Dispatching task across specialized workers...
-// Invoking InvariantQCWorker, SafetyEscalationWorker, ProtocolWorker...";
-
-            const payload = {
-                task_id: document.getElementById('task_id').value,
-                target_identifier: document.getElementById('target_id').value,
-                primary_metric: parseFloat(document.getElementById('primary_metric').value),
-                secondary_metric: parseFloat(document.getElementById('secondary_metric').value),
-                status_descriptor: document.getElementById('status_descriptor').value,
-                is_critical_flag: document.getElementById('is_critical').checked
-            };
-
-            try {
-                const res = await fetch('/api/audit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                consoleEl.innerText = JSON.stringify(data, null, 2);
-                document.getElementById('m-tasks').innerText = parseInt(document.getElementById('m-tasks').innerText) + 1;
-                document.getElementById('m-audit').innerText = parseInt(document.getElementById('m-audit').innerText) + 1;
-            } catch (err) {
-                consoleEl.innerText = "// Offline / Simulation Output:\n" + JSON.stringify({
-                    dossier_id: "DOSSIER-SIM-" + Math.floor(Math.random()*10000),
-                    system: "vcf-consensus-heterozygosity-rate",
-                    domain: "Clinical & Cryptographic AI",
-                    task_id: payload.task_id,
-                    overall_urgency: payload.is_critical_flag ? "CRITICAL_STAT_PANIC" : "ELEVATED_RISK",
-                    integrity_status: "DISCORDANT_ANOMALY",
-                    alerts: [
-                        { worker: "InvariantQCWorker", alert: "Primary metric exceeds upper reference bound" },
-                        { worker: "SafetyEscalationWorker", alert: "Critical emergency interlock flag active" }
-                    ],
-                    audit_hash: "HMAC_SHA256_e83f9a72b941d6c381f9"
-                }, null, 2);
-            }
-        }
-    </script>
+    <footer>
+      <p><strong>Counting rules:</strong> Ti/Tv uses each eligible A/C/G/T REF→ALT SNP allele once per site, including multiallelic sites; genotype counts include SNVs and non-SNV records. Haploid and polyploid called genotypes are reported separately. No frequency, clinical-risk, or diagnostic classification is inferred.</p>
+      <p>Source and CLI: <a href="https://github.com/abusuraihsakhri/vcf-consensus-heterozygosity-rate">GitHub repository</a>. No browser storage or external analytics.</p>
+    </footer>
+  </main>
 </body>
 </html>
