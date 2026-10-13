@@ -1,138 +1,259 @@
 #!/usr/bin/env python3
-"""
-VCF Transition/Transversion (Ti/Tv) & Heterozygosity Analyzer
-Computes Ti/Tv ratio, heterozygous/homozygous variant ratios, and missingness metrics across samples.
+"""VCF SNP Ti/Tv and per-sample diploid genotype metrics (standard library only).
 
-Zero-dependency Python implementation with single and batch evaluation.
-Author: Dr. Abu Suraih Sakhri
-License: MIT
+Ti/Tv counts eligible REF>ALT alleles at retained VCF sites, not genotype copies.
+Heterozygosity and missingness are descriptive call-set statistics, not clinical
+severity classifications. No reference-genome or population inference is made.
 """
+from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
-import math
-import sys
-from typing import Dict, Any, List, Optional
+import os
+import re
+from pathlib import Path
+from typing import Any, Iterable
+
+BASES = frozenset("ACGT")
+TRANSITIONS = frozenset({("A", "G"), ("G", "A"), ("C", "T"), ("T", "C")})
+COUNT_FIELDS = (
+    "transitions", "transversions", "heterozygous", "homozygous_alt",
+    "homozygous_ref", "missing", "other_ploidy",
+)
 
 
-def calculate_metrics(**kwargs) -> Dict[str, Any]:
-    """
-    Core domain algorithm for vcf-consensus-heterozygosity-rate.
-    """
-    params = {}
-    for k, v in kwargs.items():
-        if v is not None:
-            try:
-                params[k] = float(v)
-            except (ValueError, TypeError):
-                params[k] = str(v)
+def _count(value: Any, label: str) -> int:
+    """Reject negative, non-integral, non-finite and ambiguous count values."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a non-negative integer")
+    try:
+        number = float(value)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError(f"{label} must be a non-negative integer") from exc
+    if not (number.is_integer() and 0 <= number <= 2**53):
+        raise ValueError(f"{label} must be a non-negative integer")
+    return int(number)
 
-    # Deterministic domain logic
-    numeric_vals = [val for val in params.values() if isinstance(val, (int, float))]
-    primary_val = numeric_vals[0] if numeric_vals else 1.0
 
-    score = primary_val
-    for idx, nv in enumerate(numeric_vals[1:], start=2):
-        score += nv * (1.0 / idx)
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
 
-    rounded_score = round(score, 2)
-    
-    # Classification / tiering
-    if rounded_score < 10.0:
-        tier = "Low / Standard"
-        action = "Standard monitoring or negative cutoff"
-    elif rounded_score < 25.0:
-        tier = "Moderate / Intermediate"
-        action = "Close observation or secondary evaluation"
-    else:
-        tier = "High / Severe"
-        action = "Urgent clinical intervention or primary positive finding"
 
+def calculate_metrics(
+    *, transitions: int = 0, transversions: int = 0,
+    heterozygous: int = 0, homozygous_alt: int = 0,
+    homozygous_ref: int = 0, missing: int = 0, other_ploidy: int = 0,
+) -> dict[str, Any]:
+    """Calculate descriptive ratios; undefined zero-denominator ratios are null."""
+    counts = {
+        key: _count(value, key)
+        for key, value in locals().copy().items()
+    }
+    called = counts["heterozygous"] + counts["homozygous_alt"] + counts["homozygous_ref"]
+    total = called + counts["missing"] + counts["other_ploidy"]
     return {
-        "tool": "vcf-consensus-heterozygosity-rate",
-        "score": rounded_score,
-        "classification": tier,
-        "clinical_recommendation": action,
-        "inputs_evaluated": len(params),
+        **counts,
+        "called_diploid": called,
+        "genotypes_total": total,
+        "ti_tv_ratio": _ratio(counts["transitions"], counts["transversions"]),
+        "heterozygosity_rate": _ratio(counts["heterozygous"], called),
+        "het_hom_alt_ratio": _ratio(counts["heterozygous"], counts["homozygous_alt"]),
+        "missing_rate": _ratio(counts["missing"], total),
     }
 
 
-def process_single(args) -> None:
-    kwargs = vars(args)
-    kwargs.pop("func", None)
-    res = calculate_metrics(**kwargs)
-    print(json.dumps(res, indent=2))
+def parse_vcf(lines: Iterable[str], *, pass_only: bool = False) -> dict[str, Any]:
+    """Stream a plain-text VCF 4.x; count SNP alleles and per-sample GT calls.
+
+    Missing or partially missing GT is counted as missing. Fully called
+    non-diploid genotypes are counted separately, not in the diploid denominator.
+    Unfiltered sites are included by default; --pass-only retains FILTER=PASS.
+    """
+    header = None
+    samples: list[str] = []
+    per_sample: dict[str, dict[str, int]] = {}
+    variants = transitions = transversions = snv_alleles = 0
+
+    for line_number, raw in enumerate(lines, start=1):
+        line = raw.rstrip("\r\n")
+        if not line.strip():
+            continue
+        if line.startswith("##"):
+            if header is not None:
+                raise ValueError(f"Line {line_number}: metadata after column header")
+            continue
+        if line.startswith("#"):
+            if header is not None or not line.startswith("#CHROM\t"):
+                raise ValueError(f"Line {line_number}: invalid or repeated VCF header")
+            header = line.split("\t")
+            if header[:8] != ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO"]:
+                raise ValueError(f"Line {line_number}: malformed VCF columns")
+            if len(header) > 8 and header[8] != "FORMAT":
+                raise ValueError(f"Line {line_number}: expected FORMAT column")
+            samples = header[9:]
+            if len(set(samples)) != len(samples) or any(not s for s in samples):
+                raise ValueError(f"Line {line_number}: duplicate or blank sample names")
+            per_sample = {name: {key: 0 for key in COUNT_FIELDS[2:]} for name in samples}
+            continue
+        if header is None:
+            raise ValueError(f"Line {line_number}: missing #CHROM VCF header")
+
+        fields = line.split("\t")
+        if len(fields) != len(header):
+            raise ValueError(f"Line {line_number}: expected {len(header)} tab-separated columns, got {len(fields)}")
+        try:
+            if int(fields[1]) < 1:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(f"Line {line_number}: invalid POS") from exc
+        if pass_only and fields[6] != "PASS":
+            continue
+
+        alt_alleles = [] if fields[4] == "." else fields[4].split(",")
+        if not fields[3] or any(not alt for alt in alt_alleles):
+            raise ValueError(f"Line {line_number}: invalid REF/ALT")
+        ref = fields[3].upper()
+        for alt in alt_alleles:
+            alternate = alt.upper()
+            if len(ref) == len(alternate) == 1 and ref in BASES and alternate in BASES and ref != alternate:
+                snv_alleles += 1
+                if (ref, alternate) in TRANSITIONS:
+                    transitions += 1
+                else:
+                    transversions += 1
+        variants += 1
+
+        if not samples:
+            continue
+        format_keys = fields[8].split(":")
+        gt_index = format_keys.index("GT") if "GT" in format_keys else None
+        for name, sample_field in zip(samples, fields[9:]):
+            counts = per_sample[name]
+            values = sample_field.split(":")
+            gt = values[gt_index] if gt_index is not None and gt_index < len(values) else "."
+            alleles = re.split(r"[/|]", gt)
+            if any(a == "." or not a for a in alleles):
+                counts["missing"] += 1
+                continue
+            if any(not a.isascii() or not a.isdecimal() or int(a) > len(alt_alleles) for a in alleles):
+                raise ValueError(f"Line {line_number}: invalid genotype allele for sample {name}")
+            if len(alleles) != 2:
+                counts["other_ploidy"] += 1
+            elif alleles[0] != alleles[1]:
+                counts["heterozygous"] += 1
+            elif alleles[0] == "0":
+                counts["homozygous_ref"] += 1
+            else:
+                counts["homozygous_alt"] += 1
+
+    if header is None:
+        raise ValueError("Missing #CHROM VCF header")
+    return {
+        "variants_total": variants,
+        "snv_alleles": snv_alleles,
+        "transitions": transitions,
+        "transversions": transversions,
+        "ti_tv_ratio": _ratio(transitions, transversions),
+        "samples": [
+            {"sample": name, **calculate_metrics(**per_sample[name])}
+            for name in samples
+        ],
+        "pass_only": pass_only,
+    }
+
+
+def analyze_file(input_path: str, *, pass_only: bool = False) -> dict[str, Any]:
+    """Analyze .vcf or gzip-compressed .vcf.gz without loading all rows into RAM."""
+    path = _validate_path(input_path)
+    opener = gzip.open if path.lower().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig", newline="") as handle:
+        return parse_vcf(handle, pass_only=pass_only)
 
 
 def _validate_path(path_str: str) -> str:
-    """Validate that a path is safe (no directory traversal)."""
-    import os.path
-    normalized = os.path.normpath(path_str)
-    if normalized.startswith("..") or normalized.startswith("/..") or ".." + os.sep in normalized:
-        raise ValueError(f"Path traversal detected: {path_str}")
-    return normalized
+    """Reject traversal segments while allowing absolute local CLI file paths."""
+    if not path_str or "\0" in path_str or ".." in path_str.replace("\\", "/").split("/"):
+        raise ValueError(f"Path traversal or invalid path: {path_str}")
+    return os.path.normpath(path_str)
+
+
+def _csv_safe(value: Any) -> Any:
+    """Avoid spreadsheet formula execution in exported user-supplied text."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
 
 
 def process_batch(input_csv: str, output_csv: str) -> None:
+    """Read explicit count columns, write descriptive ratios to a CSV."""
     input_csv = _validate_path(input_csv)
     output_csv = _validate_path(output_csv)
-
-    try:
-        with open(input_csv, mode="r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames or [])
-            rows = list(reader)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Input CSV not found: {input_csv}")
-    except PermissionError:
-        raise PermissionError(f"Permission denied reading: {input_csv}")
-
-    out_fields = fieldnames + ["score", "classification", "clinical_recommendation"]
-    out_rows = []
-
-    for r in rows:
-        calc_res = calculate_metrics(**r)
-        row_dict = dict(r)
-        row_dict["score"] = calc_res["score"]
-        row_dict["classification"] = calc_res["classification"]
-        row_dict["clinical_recommendation"] = calc_res["clinical_recommendation"]
-        out_rows.append(row_dict)
-
-    try:
-        with open(output_csv, mode="w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=out_fields)
-            writer.writeheader()
-            writer.writerows(out_rows)
-    except PermissionError:
-        raise PermissionError(f"Permission denied writing: {output_csv}")
-
-    print(f"Processed {len(out_rows)} records -> {output_csv}")
+    if os.path.abspath(input_csv) == os.path.abspath(output_csv):
+        raise ValueError("Input and output paths must differ")
+    with open(input_csv, "r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        headers = list(reader.fieldnames or [])
+        if len(headers) != len(set(headers)) or not {"transitions", "transversions"}.issubset(headers):
+            raise ValueError("CSV requires unique headers and transitions,transversions columns")
+        output_headers = headers + [
+            key for key in ("ti_tv_ratio", "heterozygosity_rate", "het_hom_alt_ratio", "missing_rate")
+            if key not in headers
+        ]
+        rows = []
+        for line_number, row in enumerate(reader, start=2):
+            if None in row:
+                raise ValueError(f"Row {line_number}: too many CSV columns")
+            params = {key: row[key] for key in COUNT_FIELDS if key in headers}
+            result = calculate_metrics(**params)
+            rows.append({
+                **{key: _csv_safe(value) for key, value in row.items()},
+                **{key: result[key] for key in ("ti_tv_ratio", "heterozygosity_rate", "het_hom_alt_ratio", "missing_rate")},
+            })
+    with open(output_csv, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=output_headers)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Processed {len(rows)} records -> {output_csv}")
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="VCF Transition/Transversion (Ti/Tv) & Heterozygosity Analyzer")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="VCF Ti/Tv and diploid genotype statistics")
+    commands = parser.add_subparsers(dest="command", required=True)
 
-    # Single parser
-    single_parser = subparsers.add_parser("single", help="Evaluate single case")
-    single_parser.add_argument("--v1", type=float, default=10.0, help="Primary parameter")
-    single_parser.add_argument("--v2", type=float, default=5.0, help="Secondary parameter")
-    single_parser.add_argument("--v3", type=float, default=2.0, help="Tertiary parameter")
-    single_parser.set_defaults(func=process_single)
+    analyze = commands.add_parser("analyze", help="Analyze a .vcf or .vcf.gz")
+    analyze.add_argument("-i", "--input", required=True, help="VCF input path")
+    analyze.add_argument("-o", "--output", help="Optional JSON output path")
+    analyze.add_argument("--pass-only", action="store_true", help="Include FILTER=PASS records only")
 
-    # Batch parser
-    batch_parser = subparsers.add_parser("batch", help="Process batch CSV")
-    batch_parser.add_argument("-i", "--input", required=True, help="Input CSV")
-    batch_parser.add_argument("-o", "--output", default="results.csv", help="Output CSV")
+    single = commands.add_parser("single", help="Compute ratios from aggregate counts")
+    for key in COUNT_FIELDS:
+        single.add_argument("--" + key.replace("_", "-"), type=int, default=0)
+
+    batch = commands.add_parser("batch", help="Process counts in CSV rows")
+    batch.add_argument("-i", "--input", required=True)
+    batch.add_argument("-o", "--output", default="results.csv")
 
     args = parser.parse_args(argv)
-
-    if args.command == "single":
-        args.func(args)
-    elif args.command == "batch":
-        process_batch(args.input, args.output)
+    try:
+        if args.command == "analyze":
+            if args.output and os.path.abspath(_validate_path(args.input)) == os.path.abspath(_validate_path(args.output)):
+                raise ValueError("Input and output paths must differ")
+            result = analyze_file(args.input, pass_only=args.pass_only)
+            output = json.dumps(result, indent=2, allow_nan=False)
+            if args.output:
+                Path(_validate_path(args.output)).write_text(output + "\n", encoding="utf-8")
+            else:
+                print(output)
+        elif args.command == "single":
+            print(json.dumps(calculate_metrics(**{key: getattr(args, key) for key in COUNT_FIELDS}), indent=2))
+        else:
+            process_batch(args.input, args.output)
+    except (ValueError, OSError, UnicodeError, EOFError) as exc:
+        parser.exit(2, f"Error: {exc}\n")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

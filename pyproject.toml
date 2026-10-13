@@ -35,7 +35,11 @@ dev = [
 ]
 
 [project.scripts]
-vcf-consensus = "cli:main"
+vcf-consensus = "vcf_titv:main"
+vcf-agent = "cli:main"
+
+[tool.setuptools]
+py-modules = ["vcf_titv", "cli", "enrichment", "simulator"]
 
 [tool.setuptools.packages.find]
 include = ["agents*"]
